@@ -37,7 +37,9 @@ jobs:
           # Strip any pre-release suffix before calculating the numeric versionCode
           VER_NUMERIC="${VER%%-*}"          # e.g. 0.1.0
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VER_NUMERIC"
-          CODE=$(( MAJOR * 10000 + MINOR * 100 + ${PATCH:-0} ))
+          CODE=$(( MAJOR * 1000000 + MINOR * 1000 + ${PATCH:-0} ))
+          # Ensure versionCode is at least 1 (Android rejects 0)
+          if [ "$CODE" -lt 1 ]; then CODE=1; fi
           echo "version=$VER"      >> "$GITHUB_OUTPUT"
           echo "versionCode=$CODE" >> "$GITHUB_OUTPUT"
 

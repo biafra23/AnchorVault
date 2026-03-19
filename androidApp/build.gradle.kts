@@ -86,6 +86,10 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(project(":shared"))
 
@@ -100,6 +104,9 @@ dependencies {
     // SQLCipher (encrypted database)
     implementation(libs.sqlcipher.android)
     implementation(libs.sqlite.ktx)
+
+    // Encrypted SharedPreferences
+    implementation(libs.security.crypto)
 
     // Lifecycle
     implementation(libs.lifecycle.viewmodel.ktx)

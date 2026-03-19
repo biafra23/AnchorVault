@@ -16,17 +16,30 @@ import com.biafra23.anchorvault.ui.BookmarkListScreen
 import com.biafra23.anchorvault.ui.SettingsScreen
 import com.biafra23.anchorvault.ui.theme.AnchorVaultTheme
 import com.biafra23.anchorvault.viewmodel.BookmarkViewModel
+import kotlinx.coroutines.runBlocking
 
 /**
  * Desktop application entry point.
  */
 fun main() = application {
+    val prefs = remember { DesktopBitwardenPreferences() }
     val repository = remember { DesktopBookmarkRepository() }
-    val syncService = remember { createBitwardenSyncService() }
+    val syncService = remember {
+        createBitwardenSyncService().also { service ->
+            val saved = prefs.loadCredentials()
+            if (saved != null) {
+                runBlocking { service.configure(saved) }
+            }
+        }
+    }
     val viewModel = remember { BookmarkViewModel(repository, syncService) }
 
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = {
+            repository.close()
+            syncService.close()
+            exitApplication()
+        },
         title = "AnchorVault",
         state = rememberWindowState(width = 1000.dp, height = 700.dp)
     ) {
@@ -60,8 +73,9 @@ fun main() = application {
 
                 is DesktopScreen.Settings -> {
                     SettingsScreen(
-                        currentCredentials = null,
+                        currentCredentials = prefs.loadCredentials(),
                         onSaveCredentials = { credentials: BitwardenCredentials ->
+                            prefs.saveCredentials(credentials)
                             viewModel.configureBitwarden(credentials)
                             currentScreen = DesktopScreen.List
                         },

@@ -4,18 +4,23 @@ import com.biafra23.anchorvault.model.Bookmark
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.logging.LogLevel
-import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.Parameters
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.datetime.Clock
 
 /**
  * Ktor-based implementation of [BitwardenSyncService] that communicates with the
@@ -23,14 +28,19 @@ import kotlinx.serialization.json.Json
  */
 class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSyncService {
 
+    private val authMutex = Mutex()
     private var credentials: BitwardenCredentials? = null
     private var accessToken: String? = null
+    private var tokenExpiresAtMillis: Long = 0L
 
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun configure(credentials: BitwardenCredentials) {
-        this.credentials = credentials
-        this.accessToken = null
+        authMutex.withLock {
+            this.credentials = credentials
+            this.accessToken = null
+            this.tokenExpiresAtMillis = 0L
+        }
     }
 
     override fun isConfigured(): Boolean = credentials != null
@@ -40,6 +50,10 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         return try {
             val token = getAccessToken(creds) ?: return SyncResult.Error("Authentication failed")
             val folderId = getOrCreateFolder(creds, token, creds.folderName)
+
+            // Fetch all ciphers once to avoid N+1 API calls
+            val allCiphers = fetchAllCiphers(creds, token)
+
             bookmarks.forEach { bookmark ->
                 val itemBody = BitwardenItem(
                     id = bookmark.id,
@@ -47,7 +61,7 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
                     notes = json.encodeToString(Bookmark.serializer(), bookmark),
                     type = 2
                 )
-                upsertVaultItem(creds, token, folderId, itemBody)
+                upsertVaultItem(creds, token, folderId, itemBody, allCiphers)
             }
             SyncResult.Success
         } catch (e: Exception) {
@@ -73,9 +87,12 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
     }
 
     override suspend fun syncAll(localBookmarks: List<Bookmark>): Result<List<Bookmark>> {
-        return pullBookmarks().map { remoteBookmarks ->
+        return pullBookmarks().mapCatching { remoteBookmarks ->
             val merged = mergeBookmarks(localBookmarks, remoteBookmarks)
-            pushBookmarks(merged)
+            val pushResult = pushBookmarks(merged)
+            if (pushResult is SyncResult.Error) {
+                throw IllegalStateException("Push failed: ${pushResult.message}")
+            }
             merged
         }
     }
@@ -96,10 +113,17 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         return map.values.toList()
     }
 
+    fun close() {
+        httpClient.close()
+    }
+
     // region Private Bitwarden API helpers
 
     @Serializable
-    private data class TokenResponse(val access_token: String)
+    private data class TokenResponse(
+        val access_token: String,
+        val expires_in: Long = 3600
+    )
 
     @Serializable
     private data class FolderResponse(val id: String, val name: String)
@@ -120,14 +144,29 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
     private data class VaultListResponse(val data: List<VaultItemResponse>)
 
     private suspend fun getAccessToken(creds: BitwardenCredentials): String? {
-        if (accessToken != null) return accessToken
+        authMutex.withLock {
+            val now = Clock.System.now().toEpochMilliseconds()
+            if (accessToken != null && now < tokenExpiresAtMillis) return accessToken
+            // Token expired or missing — re-authenticate
+            accessToken = null
+        }
         return try {
-            val response: TokenResponse = httpClient.post("${creds.identityUrl}/connect/token") {
-                contentType(ContentType.Application.FormUrlEncoded)
-                setBody("grant_type=client_credentials&scope=api&client_id=${creds.clientId}&client_secret=${creds.clientSecret}")
-            }.body()
-            accessToken = response.access_token
-            accessToken
+            val response: TokenResponse = httpClient.submitForm(
+                url = "${creds.identityUrl}/connect/token",
+                formParameters = Parameters.build {
+                    append("grant_type", "client_credentials")
+                    append("scope", "api")
+                    append("client_id", creds.clientId)
+                    append("client_secret", creds.clientSecret)
+                }
+            ).body()
+            authMutex.withLock {
+                val now = Clock.System.now().toEpochMilliseconds()
+                accessToken = response.access_token
+                // Expire 60 seconds early to avoid edge-case failures
+                tokenExpiresAtMillis = now + (response.expires_in - 60) * 1000
+                accessToken
+            }
         } catch (_: Exception) {
             null
         }
@@ -161,6 +200,20 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         }
     }
 
+    private suspend fun fetchAllCiphers(
+        creds: BitwardenCredentials,
+        token: String
+    ): List<VaultItemResponse> {
+        return try {
+            val items: VaultListResponse = httpClient.get("${creds.apiBaseUrl}/ciphers") {
+                bearerAuth(token)
+            }.body()
+            items.data
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private suspend fun fetchVaultItems(
         creds: BitwardenCredentials,
         token: String,
@@ -168,10 +221,8 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
     ): List<VaultItemResponse> {
         return try {
             val folderId = getOrCreateFolder(creds, token, folderName)
-            val items: VaultListResponse = httpClient.get("${creds.apiBaseUrl}/ciphers") {
-                bearerAuth(token)
-            }.body()
-            items.data.filter { it.folderId == folderId && it.type == 2 }
+            val items = fetchAllCiphers(creds, token)
+            items.filter { it.folderId == folderId && it.type == 2 }
         } catch (_: Exception) {
             emptyList()
         }
@@ -189,18 +240,28 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         val secureNote: SecureNoteType = SecureNoteType()
     )
 
+    /**
+     * Upserts a vault item, matching by bookmark ID embedded in the notes JSON
+     * rather than by display name (which can change on rename).
+     */
     private suspend fun upsertVaultItem(
         creds: BitwardenCredentials,
         token: String,
         folderId: String?,
-        item: BitwardenItem
+        item: BitwardenItem,
+        allCiphers: List<VaultItemResponse>
     ) {
         try {
-            val existingItems: VaultListResponse = httpClient.get("${creds.apiBaseUrl}/ciphers") {
-                bearerAuth(token)
-            }.body()
-            val existingId = existingItems.data
-                .firstOrNull { it.folderId == folderId && it.name == item.name }?.id
+            // Match by bookmark ID in the serialized notes, not by display name
+            val existingId = allCiphers
+                .filter { it.folderId == folderId && it.type == 2 }
+                .firstOrNull { cipher ->
+                    cipher.notes?.let { notes ->
+                        runCatching {
+                            json.decodeFromString(Bookmark.serializer(), notes).id
+                        }.getOrNull() == item.id
+                    } ?: false
+                }?.id
 
             val body = CipherRequest(
                 type = item.type,
@@ -237,9 +298,6 @@ fun createBitwardenSyncService(): KtorBitwardenSyncService {
     val client = HttpClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
-        }
-        install(Logging) {
-            level = LogLevel.INFO
         }
     }
     return KtorBitwardenSyncService(client)

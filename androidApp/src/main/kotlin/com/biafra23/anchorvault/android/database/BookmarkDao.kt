@@ -13,13 +13,14 @@ interface BookmarkDao {
     fun getAllBookmarks(): Flow<List<BookmarkEntity>>
 
     /**
-     * Returns bookmarks that contain [tag] in their comma-separated tags column.
-     * The pattern matches whole-word tags to avoid partial matches (e.g. "dev" vs "development").
+     * Returns bookmarks that contain [tag] in their tags column.
+     * Supports both JSON array format (`["tag1","tag2"]`) and legacy comma-separated format.
      */
     @Query(
         """
-        SELECT * FROM bookmarks 
-        WHERE (',' || tags || ',') LIKE ('%,' || :tag || ',%')
+        SELECT * FROM bookmarks
+        WHERE tags LIKE '%"' || :tag || '"%'
+           OR (',' || tags || ',') LIKE ('%,' || :tag || ',%')
         ORDER BY updatedAt DESC
         """
     )

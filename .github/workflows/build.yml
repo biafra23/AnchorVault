@@ -30,6 +30,9 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      - name: Run shared module checks
+        run: ./gradlew :shared:check --no-daemon
+
       - name: Build Android debug APK
         run: ./gradlew :androidApp:assembleDebug --no-daemon
 

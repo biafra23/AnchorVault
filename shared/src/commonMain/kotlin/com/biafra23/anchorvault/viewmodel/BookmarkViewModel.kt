@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -71,8 +73,14 @@ class BookmarkViewModel(
 
     val uiState: StateFlow<BookmarkListUiState> = combine(
         _filterState.flatMapLatest { (tag, query) ->
-            if (query.isBlank()) repository.getBookmarks(tag)
-            else repository.searchBookmarks(query)
+            if (query.isBlank()) {
+                repository.getBookmarks(tag)
+            } else {
+                // Apply both search query and tag filter simultaneously
+                repository.searchBookmarks(query).map { results ->
+                    if (tag != null) results.filter { it.tags.contains(tag) } else results
+                }
+            }
         },
         repository.getAllTags(),
         _filterState,
@@ -138,8 +146,9 @@ class BookmarkViewModel(
                 return@launch
             }
             _syncStatus.value = SyncStatus.Syncing
-            val currentBookmarks = uiState.value.bookmarks
-            val result = syncService.syncAll(currentBookmarks)
+            // Get the full unfiltered bookmark list from the repository, not the filtered UI state
+            val allBookmarks = repository.getBookmarks(null).first()
+            val result = syncService.syncAll(allBookmarks)
             result.fold(
                 onSuccess = { mergedBookmarks ->
                     mergedBookmarks.forEach { repository.upsertBookmark(it) }
@@ -159,4 +168,3 @@ class BookmarkViewModel(
         }
     }
 }
-

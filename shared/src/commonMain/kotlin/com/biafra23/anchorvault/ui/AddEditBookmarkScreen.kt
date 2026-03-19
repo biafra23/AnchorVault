@@ -230,6 +230,13 @@ fun AddEditBookmarkScreen(
                         "https://$url"
                     } else url
 
+                    // Basic URL format validation
+                    val urlPattern = Regex("^https?://[^\\s/\$.?#].[^\\s]*$")
+                    if (!urlPattern.matches(normalizedUrl)) {
+                        urlError = "Please enter a valid URL"
+                        return@Button
+                    }
+
                     val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
                     val bookmark = Bookmark(
                         id = existingBookmark?.id ?: generateId(),
@@ -251,10 +258,6 @@ fun AddEditBookmarkScreen(
     }
 }
 
-/** Platform-agnostic ID generation using a timestamp + random suffix. */
-private fun generateId(): String {
-    val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-    val random = (0 until 8).map { chars.random() }.joinToString("")
-    val timestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-    return "$timestamp-$random"
-}
+/** Generates a unique bookmark ID using a random UUID. */
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+private fun generateId(): String = kotlin.uuid.Uuid.random().toString()

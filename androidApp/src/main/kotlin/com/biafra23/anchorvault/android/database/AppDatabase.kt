@@ -12,7 +12,7 @@ import net.sqlcipher.database.SupportFactory
 @Database(
     entities = [BookmarkEntity::class],
     version = 1,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookmarkDao(): BookmarkDao
@@ -42,7 +42,6 @@ abstract class AppDatabase : RoomDatabase() {
                 DATABASE_NAME
             )
                 .openHelperFactory(SupportFactory(passphrase))
-                .fallbackToDestructiveMigration()
                 .build()
     }
 }
