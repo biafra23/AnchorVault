@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.nio.file.Files
+import java.util.Base64
 
 plugins {
     alias(libs.plugins.android.application)
@@ -35,8 +37,8 @@ android {
             // is never placed in the cached build directory, and is deleted on JVM exit.
             val keystoreB64 = System.getenv("ANDROID_KEYSTORE_BASE64")
             if (keystoreB64 != null) {
-                val keystoreFile = java.nio.file.Files.createTempFile("anchorvault-", ".keystore").toFile()
-                keystoreFile.writeBytes(java.util.Base64.getDecoder().decode(keystoreB64))
+                val keystoreFile = Files.createTempFile("anchorvault-", ".keystore").toFile()
+                keystoreFile.writeBytes(Base64.getDecoder().decode(keystoreB64))
                 keystoreFile.deleteOnExit()
                 storeFile = keystoreFile
                 storePassword = System.getenv("ANDROID_STORE_PASSWORD") ?: ""
