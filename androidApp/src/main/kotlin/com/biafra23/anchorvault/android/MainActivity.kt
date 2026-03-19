@@ -27,23 +27,18 @@ class MainActivity : ComponentActivity() {
 
     private val bookmarkViewModel: BookmarkViewModel by viewModel()
 
+    /** Hoisted so onNewIntent can update navigation state. */
+    private var currentScreen by mutableStateOf<Screen>(Screen.List)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         // Pre-populate URL from an incoming SEND intent (share from browser)
-        val sharedUrl = if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT)
-        } else null
+        handleShareIntent(intent)
 
         setContent {
             AnchorVaultTheme {
-                var currentScreen by remember {
-                    mutableStateOf<Screen>(
-                        if (sharedUrl != null) Screen.AddEdit(prefilledUrl = sharedUrl)
-                        else Screen.List
-                    )
-                }
 
                 when (val screen = currentScreen) {
                     is Screen.List -> BookmarkListScreen(
@@ -90,8 +85,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Handle new share intents when the activity is already running
         setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND) {
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { url ->
+                currentScreen = Screen.AddEdit(prefilledUrl = url)
+            }
+        }
     }
 }
 

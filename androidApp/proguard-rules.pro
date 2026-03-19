@@ -31,6 +31,8 @@
 # Ktor
 -keep class io.ktor.** { *; }
 -keep class kotlinx.coroutines.** { *; }
+-dontwarn java.lang.management.ManagementFactory
+-dontwarn java.lang.management.RuntimeMXBean
 
 # Koin
 -keep class org.koin.** { *; }

@@ -230,7 +230,7 @@ fun AddEditBookmarkScreen(
                         "https://$url"
                     } else url
 
-                    val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
+                    val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
                     val bookmark = Bookmark(
                         id = existingBookmark?.id ?: generateId(),
                         url = normalizedUrl,
@@ -255,6 +255,6 @@ fun AddEditBookmarkScreen(
 private fun generateId(): String {
     val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
     val random = (0 until 8).map { chars.random() }.joinToString("")
-    val timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
+    val timestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
     return "$timestamp-$random"
 }
