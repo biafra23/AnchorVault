@@ -5,6 +5,8 @@ import com.biafra23.anchorvault.android.database.AppDatabase
 import com.biafra23.anchorvault.android.database.DatabaseKeyManager
 import com.biafra23.anchorvault.android.database.RoomBookmarkRepository
 import com.biafra23.anchorvault.android.sync.AndroidBitwardenPreferences
+import com.biafra23.anchorvault.autotag.AutoTagService
+import com.biafra23.anchorvault.autotag.createAutoTagService
 import com.biafra23.anchorvault.repository.BookmarkRepository
 import com.biafra23.anchorvault.sync.BitwardenSyncService
 import com.biafra23.anchorvault.sync.createBitwardenSyncService
@@ -20,6 +22,9 @@ import org.koin.dsl.module
 val appModule = module {
     // Application-level coroutine scope
     single { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+
+    // Bitwarden credential storage
+    single { AndroidBitwardenPreferences(androidContext()) }
 
     // Database
     single<AppDatabase> {
@@ -39,7 +44,7 @@ val appModule = module {
     single<BitwardenSyncService> {
         val service = createBitwardenSyncService()
         // Restore previously saved credentials on app start
-        val prefs = AndroidBitwardenPreferences(androidContext())
+        val prefs = get<AndroidBitwardenPreferences>()
         val savedCredentials = prefs.loadCredentials()
         if (savedCredentials != null) {
             get<CoroutineScope>().launch {
@@ -49,8 +54,11 @@ val appModule = module {
         service
     }
 
+    // Auto-tag service
+    single<AutoTagService> { createAutoTagService() }
+
     // ViewModel
     viewModel {
-        BookmarkViewModel(get(), get())
+        BookmarkViewModel(get(), get(), get())
     }
 }

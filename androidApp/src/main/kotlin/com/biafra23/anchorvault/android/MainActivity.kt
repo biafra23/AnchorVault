@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +18,7 @@ import com.biafra23.anchorvault.ui.BookmarkListScreen
 import com.biafra23.anchorvault.ui.SettingsScreen
 import com.biafra23.anchorvault.ui.theme.AnchorVaultTheme
 import com.biafra23.anchorvault.viewmodel.BookmarkViewModel
+import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 /**
@@ -26,6 +28,7 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 class MainActivity : ComponentActivity() {
 
     private val bookmarkViewModel: BookmarkViewModel by viewModel()
+    private val bitwardenPrefs: AndroidBitwardenPreferences by inject()
 
     /** Hoisted so onNewIntent can update navigation state. */
     private var currentScreen by mutableStateOf<Screen>(Screen.List)
@@ -39,6 +42,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AnchorVaultTheme {
+                var autoTagEnabled by remember { mutableStateOf(bitwardenPrefs.loadAutoTagEnabled()) }
 
                 when (val screen = currentScreen) {
                     is Screen.List -> BookmarkListScreen(
@@ -50,10 +54,15 @@ class MainActivity : ComponentActivity() {
 
                     is Screen.AddEdit -> {
                         val uiState = bookmarkViewModel.uiState.value
+                        val autoTagState by bookmarkViewModel.autoTagState.collectAsState()
                         AddEditBookmarkScreen(
                             existingBookmark = screen.existing,
                             prefilledUrl = screen.prefilledUrl,
                             existingTags = uiState.allTags,
+                            autoTagEnabled = autoTagEnabled,
+                            autoTagState = autoTagState,
+                            onAutoTag = { url -> bookmarkViewModel.fetchAutoTags(url) },
+                            onAutoTagConsumed = { bookmarkViewModel.clearAutoTagState() },
                             onSave = { bookmark ->
                                 if (screen.existing != null) {
                                     bookmarkViewModel.updateBookmark(bookmark)
@@ -67,11 +76,15 @@ class MainActivity : ComponentActivity() {
                     }
 
                     is Screen.Settings -> {
-                        val prefs = remember { AndroidBitwardenPreferences(this) }
                         SettingsScreen(
-                            currentCredentials = prefs.loadCredentials(),
+                            currentCredentials = bitwardenPrefs.loadCredentials(),
+                            autoTagEnabled = autoTagEnabled,
+                            onAutoTagEnabledChanged = { enabled ->
+                                autoTagEnabled = enabled
+                                bitwardenPrefs.saveAutoTagEnabled(enabled)
+                            },
                             onSaveCredentials = { credentials: BitwardenCredentials ->
-                                prefs.saveCredentials(credentials)
+                                bitwardenPrefs.saveCredentials(credentials)
                                 bookmarkViewModel.configureBitwarden(credentials)
                                 currentScreen = Screen.List
                             },
