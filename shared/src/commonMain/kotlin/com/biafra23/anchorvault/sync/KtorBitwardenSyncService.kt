@@ -68,15 +68,21 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         get() = vaultEncKey != null && vaultMacKey != null
 
     /** Encrypt a string for the vault if encryption is enabled, otherwise return plaintext. */
-    private fun encryptIfEnabled(plaintext: String): String =
-        if (isEncryptionEnabled) BitwardenEncryption.encryptString(plaintext, vaultEncKey!!, vaultMacKey!!)
+    private fun encryptIfEnabled(plaintext: String): String {
+        val encKey = vaultEncKey
+        val macKey = vaultMacKey
+        return if (encKey != null && macKey != null) BitwardenEncryption.encryptString(plaintext, encKey, macKey)
         else plaintext
+    }
 
     /** Decrypt a vault string if encryption is enabled, otherwise return as-is. */
-    private fun decryptIfEnabled(value: String): String =
-        if (isEncryptionEnabled && value.startsWith("2."))
-            BitwardenEncryption.decryptToString(value, vaultEncKey!!, vaultMacKey!!)
+    private fun decryptIfEnabled(value: String): String {
+        val encKey = vaultEncKey
+        val macKey = vaultMacKey
+        return if (encKey != null && macKey != null && value.startsWith("2."))
+            BitwardenEncryption.decryptToString(value, encKey, macKey)
         else value
+    }
 
     override fun isConfigured(): Boolean = credentials != null
 
@@ -86,7 +92,6 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
             val token = getAccessToken(credentials)
                 ?: return "Authentication failed — check your Client ID, Client Secret, and Identity URL."
             getOrCreateFolder(credentials, token, credentials.folderName)
-                ?: return "Authenticated, but failed to find or create folder '${credentials.folderName}'."
             log("Credential validation successful")
             null // success
         } catch (e: Exception) {
@@ -102,9 +107,6 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
             val token = getAccessToken(creds) ?: return SyncResult.Error("Authentication failed")
             val folderId = getOrCreateFolder(creds, token, creds.folderName)
             log("Using folderId=$folderId for push")
-            if (folderId == null) {
-                return SyncResult.Error("Failed to find or create folder '${creds.folderName}'")
-            }
 
             // Fetch all ciphers once to avoid N+1 API calls
             val allCiphers = fetchAllCiphers(creds, token)
@@ -290,7 +292,7 @@ class KtorBitwardenSyncService(private val httpClient: HttpClient) : BitwardenSy
         creds: BitwardenCredentials,
         token: String,
         folderName: String
-    ): String? {
+    ): String {
         val foldersUrl = "${creds.apiBaseUrl}/folders"
         log("Listing folders from $foldersUrl")
         val foldersResponse = httpClient.get(foldersUrl) {

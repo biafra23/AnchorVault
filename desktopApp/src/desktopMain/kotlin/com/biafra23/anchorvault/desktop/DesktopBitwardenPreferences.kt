@@ -188,9 +188,15 @@ class DesktopBitwardenPreferences {
     private class Pkcs12KeyStoreBackend(private val appDir: File) : KeyBackend {
         private val keystoreFile = File(appDir, "keystore.p12")
         private val keystorePassword: CharArray = run {
+            // Derive a keystore password from OS-user identity using PBKDF2 so that
+            // the raw PKCS12 file cannot be brute-forced trivially.
             val user = System.getProperty("user.name") ?: "unknown"
             val home = System.getProperty("user.home") ?: "/tmp"
-            "AnchorVault:$user:$home".toCharArray()
+            val base = "AnchorVault:$user:$home"
+            val salt = "AnchorVault-PKCS12-salt".toByteArray()
+            val spec = javax.crypto.spec.PBEKeySpec(base.toCharArray(), salt, 100_000, 256)
+            val skf = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            java.util.Base64.getEncoder().encodeToString(skf.generateSecret(spec).encoded).toCharArray()
         }
 
         override fun isAvailable(): Boolean = true
@@ -235,7 +241,8 @@ private fun runCommand(vararg command: String): String? {
         val output = process.inputStream.bufferedReader().readText()
         val exitCode = process.waitFor()
         if (exitCode == 0) output else null
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        System.err.println("runCommand failed [${command.joinToString(" ")}]: ${e.message}")
         null
     }
 }
@@ -249,7 +256,8 @@ private fun runCommandWithStdin(input: String, vararg command: String): String? 
         val output = process.inputStream.bufferedReader().readText()
         val exitCode = process.waitFor()
         if (exitCode == 0) output else null
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        System.err.println("runCommandWithStdin failed [${command.joinToString(" ")}]: ${e.message}")
         null
     }
 }
